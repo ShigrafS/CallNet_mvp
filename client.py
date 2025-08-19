@@ -8,12 +8,11 @@ import time
 import argparse
 
 class VoiceClient:
-    # Audio parameters
     CHUNK = 1024
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 44100
-    
+
     def __init__(self, host, port):
         self.host = host
         self.port = port
@@ -21,25 +20,19 @@ class VoiceClient:
         self.name = ''
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.audio = pyaudio.PyAudio()
-        
-        # Set up audio streams
+        self.call_active = False
+
         self.input_stream = self.audio.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
-            input=True,
+            format=self.FORMAT, channels=self.CHANNELS,
+            rate=self.RATE, input=True,
             frames_per_buffer=self.CHUNK
         )
-        
         self.output_stream = self.audio.open(
-            format=self.FORMAT,
-            channels=self.CHANNELS,
-            rate=self.RATE,
-            output=True,
+            format=self.FORMAT, channels=self.CHANNELS,
+            rate=self.RATE, output=True,
             frames_per_buffer=self.CHUNK
         )
-        
-        # Connect to server
+
         print(colored(f"Connecting to voice server at {host}:{port}...", "yellow"))
         try:
             self.sock.connect((host, port))
@@ -48,40 +41,30 @@ class VoiceClient:
             self.cleanup()
             sys.exit(1)
         print(colored("Connected to voice server.", "green"))
-        
+
     def start(self):
-        """Start the voice client"""
-        # Set up signal handler
         signal.signal(signal.SIGINT, self.handle_signal)
-        
-        # Get user's name
         while not self.name:
             self.name = input(colored("Enter your name: ", "blue")).strip()
-            
-        # Send name to server
         self.sock.send(f"NAME:{self.name}".encode())
-        
-        # Start audio threads
-        receive_thread = threading.Thread(target=self.receive_audio)
-        send_thread = threading.Thread(target=self.send_audio)
-        
-        receive_thread.daemon = True
-        send_thread.daemon = True
-        
+
+        receive_thread = threading.Thread(target=self.receive_audio, daemon=True)
+        send_thread = threading.Thread(target=self.send_audio, daemon=True)
+        text_thread = threading.Thread(target=self.user_input_loop, daemon=True)
+
         receive_thread.start()
         send_thread.start()
-        
+        text_thread.start()
+
         print(colored("Voice chat started! Press Ctrl+C to exit.", "yellow"))
-        
-        # Keep main thread alive (cross-platform)
+
         try:
             while self.running:
-                time.sleep(0.1)  # Sleep briefly to prevent high CPU usage
+                time.sleep(0.1)
         except KeyboardInterrupt:
             self.handle_signal(None, None)
 
     def send_audio(self):
-        """Capture and send audio to server"""
         while self.running:
             try:
                 data = self.input_stream.read(self.CHUNK, exception_on_overflow=False)
@@ -91,64 +74,92 @@ class VoiceClient:
                 if self.running:
                     print(colored(f"Error sending audio: {e}", "red"))
                 break
-                
+
     def receive_audio(self):
-        """Receive and play audio from server"""
         while self.running:
             try:
                 data = self.sock.recv(self.CHUNK * 2)
                 if not data:
                     break
-                    
-                # Check for control messages
+
+                # Handle control / text messages
                 if data.startswith(b"CONTROL:"):
                     message = data[8:].decode()
-                    print(colored(message, "cyan"))
+
+                    if message.startswith("INCOMING_CALL:"):
+                        caller = message[len("INCOMING_CALL:"):]
+                        print(colored(f"[!] Incoming call from {caller}. Type /accept or /reject", "cyan"))
+
+                    elif message == "CALL_ACCEPTED":
+                        self.call_active = True
+                        print(colored("[✓] Call accepted!", "green"))
+
+                    elif "CALL_ENDED" in message or "CALL_REJECTED" in message:
+                        self.call_active = False
+                        print(colored("[!] Call ended or rejected.", "red"))
+
+                    else:
+                        print(colored(message, "cyan"))
                     continue
-                    
-                # Check for server full message
-                if data == b"SERVER_FULL":
-                    print(colored("Server is full. Try again later.", "red"))
-                    self.running = False
-                    break
-                    
-                # Play audio data
-                self.output_stream.write(data)
-                
+
+                # If actual audio
+                if self.call_active or True:
+                    self.output_stream.write(data)
+
             except Exception as e:
                 if self.running:
                     print(colored(f"Error receiving audio: {e}", "red"))
                 break
-                
+
+    def user_input_loop(self):
+        """Handle slash commands from user (text)"""
+        while self.running:
+            cmd = input().strip()
+            if cmd:
+                if cmd == "/quit":
+                    self.handle_signal(None, None)
+                else:
+                    self.sock.send(cmd.encode())
+
     def handle_signal(self, signum, frame):
-        """Handle Ctrl+C"""
         print(colored("\nExiting voice chat...", "yellow"))
         self.running = False
         self.cleanup()
         sys.exit(0)
-        
+
     def cleanup(self):
-        """Cleanup resources"""
         self.running = False
         if hasattr(self, 'input_stream'):
-            self.input_stream.stop_stream()
-            self.input_stream.close()
+            try:
+                self.input_stream.stop_stream()
+                self.input_stream.close()
+            except:
+                pass
         if hasattr(self, 'output_stream'):
-            self.output_stream.stop_stream()
-            self.output_stream.close()
+            try:
+                self.output_stream.stop_stream()
+                self.output_stream.close()
+            except:
+                pass
         if hasattr(self, 'audio'):
-            self.audio.terminate()
+            try:
+                self.audio.terminate()
+            except:
+                pass
         if hasattr(self, 'sock'):
-            self.sock.close()
-            
+            try:
+                self.sock.close()
+            except:
+                pass
+
 def main():
     parser = argparse.ArgumentParser(description='Voice Chat Client')
     parser.add_argument('host', help='server address')
     parser.add_argument('port', type=int, help='server port')
     args = parser.parse_args()
-    
+
     client = VoiceClient(args.host, args.port)
     client.start()
-    
+
 if __name__ == "__main__":
     main()
