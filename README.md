@@ -1,4 +1,4 @@
-# Simple Python Chat Application
+# CallNet
 
 [![Python](https://img.shields.io/badge/python-3.7%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -156,5 +156,6 @@ This project is provided as-is for learning and demo purposes.
 ---
 
 **Happy chatting!** 🎉
+
 
 
