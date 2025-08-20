@@ -7,6 +7,9 @@ from termcolor import colored
 import time
 import argparse
 
+# NEW: import register from the register_client file
+from register_client import register
+
 class VoiceClient:
     CHUNK = 1024
     FORMAT = pyaudio.paInt16
@@ -14,6 +17,24 @@ class VoiceClient:
     RATE = 44100
 
     def __init__(self, host, port):
+        # FIRST: perform registration and store the assigned number
+        try:
+            response = register()  # this prints and returns a number by default
+            assigned = None
+
+            # If response is a dict: extract number
+            if isinstance(response, dict):
+                assigned = response.get("number")
+            # If it's a string (JSON text etc.), store it anyway
+            elif isinstance(response, str):
+                assigned = response
+            self.assigned_number = assigned
+            if assigned:
+                print(colored(f"✓ Device registered. Assigned Number: {assigned}", "green"))
+        except Exception as e:
+            print(colored(f"[!] Registration failed: {e}", "red"))
+            self.assigned_number = None
+
         self.host = host
         self.port = port
         self.running = True
@@ -44,8 +65,15 @@ class VoiceClient:
 
     def start(self):
         signal.signal(signal.SIGINT, self.handle_signal)
+
+        # Ask user name
         while not self.name:
             self.name = input(colored("Enter your name: ", "blue")).strip()
+
+        # Attach assigned number
+        if self.assigned_number:
+            self.name = f"{self.name}#{self.assigned_number}"
+
         self.sock.send(f"NAME:{self.name}".encode())
 
         receive_thread = threading.Thread(target=self.receive_audio, daemon=True)
